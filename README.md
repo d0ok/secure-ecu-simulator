@@ -4,7 +4,7 @@ A lightweight Electronic Control Unit (ECU) simulator written in C that uses Lin
 
 The project explores automotive cybersecurity concepts through a modular, AUTOSAR-inspired architecture, including message authentication, freshness management, replay protection, and secure command processing.
 
-> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. Counter persistence, fuzz testing, and continuous integration are planned next.
+> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. The freshness counter survives restarts. Fuzz testing and continuous integration are planned next.
 
 ## Objectives
 
@@ -25,13 +25,13 @@ The project explores automotive cybersecurity concepts through a modular, AUTOSA
 - Configurable test key through an environment variable.
 - Receiver-side freshness counter tracking, with rejection of duplicate and stale messages.
 - Bounded forward counter jump and counter-exhaustion handling.
+- Persistent freshness counter that survives receiver restarts, with atomic file writes and a refusal to start on a corrupt counter file.
 - Layered software: communication, security, and ECU application.
 - Simulated ECU commands (lock, unlock, status, ping) that run only after authentication and freshness validation succeed.
 - Unit tests for each layer, and an automated live integration test.
 
 ### Planned
 
-- Persistent freshness counter across receiver restarts.
 - Fuzz testing of malformed frames.
 - Continuous integration.
 - Architecture diagrams and test documentation in `docs/`.
@@ -70,6 +70,7 @@ Checks always run in this order: frame validation, HMAC verification, freshness.
 | Security | `sec_layer` | Runs the validation pipeline and returns one result per frame. Has no socket code, so it is unit-tested with hand-built frames. |
 | Security | `secoc` | Builds and verifies the truncated HMAC-SHA-256 tag. |
 | Security | `freshness` | Tracks the last accepted counter and rejects replayed, stale, or implausible counters. |
+| Security | `counter_store` | Saves and restores the last accepted counter so replay protection survives a restart. |
 | Application | `ecu_app` | Executes supported commands on a simulated ECU state. |
 
 The project uses an AUTOSAR-inspired design for learning purposes. It is not a complete AUTOSAR implementation and does not claim compliance with an AUTOSAR release.
@@ -119,12 +120,25 @@ After a frame passes frame validation and HMAC verification, the receiver applie
 
 Every rejection leaves the stored counter unchanged. A jump limit of 0 disables the jump check.
 
+## Counter Persistence
+
+The last accepted counter is stored in a file, so frames captured before a restart cannot be replayed afterwards.
+
+- **Location:** `$SECURE_ECU_COUNTER_FILE` if set, otherwise `~/.secure_ecu_counter`.
+- **Startup:** A missing file means a first start at counter 0. A corrupt or unreadable file stops the receiver, because silently resetting would reopen the replay window.
+- **Save before execute:** An accepted counter is written to disk before the command runs. If the save fails, the command is not executed.
+- **Atomic writes:** The counter is written to a temporary file, flushed to disk, and renamed over the real file, so a crash cannot leave a half-written counter.
+- **Format:** One line, `v1 <counter> <bitwise complement in hex>`, which detects truncation and garbage.
+
+To start over during development, delete the file (`rm -f ~/.secure_ecu_counter`) or point `SECURE_ECU_COUNTER_FILE` at a new path.
+
 ## Project Structure
 
 ```text
 secure-ecu-simulator/
 ├── include/
 │   ├── can_if.h
+│   ├── counter_store.h
 │   ├── ecu_app.h
 │   ├── freshness.h
 │   ├── sec_layer.h
@@ -132,6 +146,7 @@ secure-ecu-simulator/
 ├── src/
 │   ├── can_if.c
 │   ├── can_receiver.c
+│   ├── counter_store.c
 │   ├── ecu_app.c
 │   ├── freshness.c
 │   ├── sec_layer.c
@@ -139,6 +154,7 @@ secure-ecu-simulator/
 │   └── secoc_sender.c
 ├── tests/
 │   ├── live_test.sh
+│   ├── test_counter_store.c
 │   ├── test_ecu_app.c
 │   ├── test_freshness.c
 │   ├── test_sec_layer.c
@@ -238,12 +254,13 @@ The build produces the receiver, the sender, and one test program per module in 
 make test
 ```
 
-This runs four suites:
+This runs five suites:
 
 - **SecOC:** key parsing, payload construction, acceptance of authentic payloads, rejection of modified commands, parameters, freshness values, tags, CAN identifiers, and payload lengths.
 - **Freshness:** increasing counters, duplicate and older counters, jump limits, unchanged state after a rejection, unlimited jumps, counter exhaustion and wraparound, and NULL arguments.
 - **Security layer:** the full validation pipeline using hand-built frames, including forged tags that must not consume the counter, classic CAN, wrong length, extended, remote, and error frames, wrong CAN identifier, and a tag signed for a different identifier.
 - **ECU application:** each command, state changes, unsupported commands changing nothing, truncated output buffers, and invalid arguments.
+- **Counter store:** saving and loading, the file format and permissions, atomic replacement, corrupt and truncated files, unwritable locations, and path resolution.
 
 ## Live SocketCAN Testing
 
@@ -255,7 +272,13 @@ With `vcan0` up:
 make integration
 ```
 
-The script starts the receiver, sends valid, forged, replayed, stale, oversized-jump, and malformed frames, checks every result, and finishes with `ALL INTEGRATION CHECKS PASSED` when everything matches. The three malformed frames are sent with `cansend` from `can-utils`.
+The script uses a throwaway counter file and runs three phases:
+
+1. Valid, forged, replayed, stale, oversized-jump, and malformed frames, with lock and status commands. The malformed frames are sent with `cansend` from `can-utils`.
+2. A receiver restart on the same counter file. The last counter accepted before the restart must be rejected as a replay, and the next counter must be accepted.
+3. A corrupted counter file, which must make the receiver refuse to start.
+
+It finishes with `ALL INTEGRATION CHECKS PASSED` when every check matches.
 
 ### Manual
 
@@ -284,7 +307,7 @@ In Terminal 2:
 ./build/secoc_sender vcan0 valid 13 03   # accepted: status
 ```
 
-The sender usage is `secoc_sender <interface> <valid|forged> <counter> [command-hex]`. The command defaults to `A1` (ping). The first counter after a receiver start must be within `FRESHNESS_MAX_JUMP` of 0.
+The sender usage is `secoc_sender <interface> <valid|forged> <counter> [command-hex]`. The command defaults to `A1` (ping). The counter persists between runs, so counters must keep increasing. To start over, run `rm -f ~/.secure_ecu_counter` or set `SECURE_ECU_COUNTER_FILE` to a new path. On a fresh start, the first counter must be within `FRESHNESS_MAX_JUMP` of 0.
 
 Example receiver output for an accepted command:
 
@@ -300,7 +323,7 @@ Example receiver output for an accepted command:
 - **Check ordering:** Frame checks, then HMAC, then freshness. Commands run only after all three pass, and forged frames cannot advance the counter.
 - **Jump limit:** A bounded forward jump prevents a single authenticated frame from pushing the counter near `UINT32_MAX` and locking out the legitimate sender.
 - **Counter exhaustion:** Once the counter reaches `UINT32_MAX`, all frames are rejected. A real system would need key or session rollover.
-- **Counter persistence:** The counter is stored in RAM and resets to 0 when the receiver restarts. Frames recorded earlier could be replayed after a restart. Real ECUs persist the counter in non-volatile memory or resynchronize through a protocol.
+- **Counter persistence:** The counter is saved to a file and restored at startup, so frames recorded before a restart are rejected as replays. A corrupt counter file stops the receiver instead of resetting it. The file is not protected: anyone who can edit or delete it can reset the counter, and the simulator saves after every accepted frame. A real ECU would keep the counter in protected non-volatile memory, limit write frequency to reduce wear, and resynchronize with the sender through a protocol.
 - **Key management:** The environment variable is a development convenience. A real automotive implementation requires appropriate secret provisioning, access controls, and key lifecycle management.
 - **Transport:** `vcan0` is a software testing interface, not a physical CAN bus.
 - **Safety:** The simulator is not intended for deployment in a production vehicle or safety-critical ECU.
@@ -317,7 +340,7 @@ Example receiver output for an accepted command:
 - [x] Complete live valid, forged, and replay integration testing.
 - [x] Implement AUTOSAR-inspired software layers.
 - [x] Add ECU command processing after security checks.
-- [ ] Persist the freshness counter across restarts.
+- [x] Persist the freshness counter across restarts.
 - [ ] Add fuzz testing for malformed frames.
 - [ ] Add architecture diagrams and test documentation to `docs/`.
 - [ ] Configure continuous integration.

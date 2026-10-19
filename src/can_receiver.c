@@ -9,6 +9,7 @@
 #include <openssl/crypto.h>
 
 #include "can_if.h"
+#include "counter_store.h"
 #include "ecu_app.h"
 #include "freshness.h"
 #include "sec_layer.h"
@@ -27,6 +28,9 @@ int main(int argc, char **argv)
     const char *ifname = "vcan0";
     const char *key_hex = getenv("SECURE_ECU_KEY_HEX");
     uint8_t key[SECOC_KEY_LEN] = {0};
+    char ctr_path[CSTORE_PATH_MAX];
+    uint32_t restored = 0U;
+    cstore_status_t cs;
     int exit_status = EXIT_FAILURE;
     struct sigaction sa;
     can_if_t can;
@@ -52,6 +56,24 @@ int main(int argc, char **argv)
     }
     sec_init(&sec, key, FRESHNESS_MAX_JUMP);
     ecu_app_init(&app);
+
+    if (cstore_resolve_path(ctr_path, sizeof(ctr_path)) != 0) {
+        fprintf(stderr, "Cannot determine the counter file. "
+                        "Set SECURE_ECU_COUNTER_FILE or HOME.\n");
+        goto cleanup;
+    }
+    cs = cstore_load(ctr_path, &restored);
+    if (cs == CSTORE_OK) {
+        sec.freshness.last_accepted = restored;
+        printf("Restored last accepted counter %u from %s\n",
+               (unsigned int)restored, ctr_path);
+    } else if (cs == CSTORE_NOT_FOUND) {
+        printf("No counter file at %s; starting at 0\n", ctr_path);
+    } else {
+        fprintf(stderr, "Counter file %s: %s. Refusing to start so that old "
+                        "frames cannot be replayed.\n", ctr_path, cstore_status_str(cs));
+        goto cleanup;
+    }
 
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handle_signal;
@@ -103,6 +125,18 @@ int main(int argc, char **argv)
                        (unsigned int)msg.id, (unsigned int)msg.len,
                        sec_result_str(&res));
             }
+            fflush(stdout);
+            continue;
+        }
+
+        /* Persist BEFORE executing, so a crash after the command cannot
+         * let the same frame be replayed after a restart. Fail closed. */
+        cs = cstore_save(ctr_path, res.freshness);
+        if (cs != CSTORE_OK) {
+            printf("[REJECT] ID=0x%03X FRESHNESS=%u: cannot persist counter (%s); "
+                   "command not executed\n",
+                   (unsigned int)msg.id, (unsigned int)res.freshness,
+                   cstore_status_str(cs));
             fflush(stdout);
             continue;
         }

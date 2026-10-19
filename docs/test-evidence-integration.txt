@@ -1,4 +1,6 @@
 bash tests/live_test.sh
+=== Phase 1: valid, forged, replayed, stale and malformed frames ===
+No counter file at /tmp/tmp.mOsugHOfZS; starting at 0
 Secure ECU receiver listening on vcan0 (CAN ID 0x123).
 Layers: SocketCAN -> frame checks -> HMAC -> freshness -> ECU application.
 [ACCEPT] ID=0x123 CMD=0xA1 PARAMS=10 20 30 FRESHNESS=10
@@ -31,4 +33,24 @@ Secure ECU receiver stopped.
 [PASS] frame 11: unexpected CAN identifier
 [PASS] lock executed
 [PASS] status reports LOCKED after 3 commands
+[PASS] first start had no counter file
+[PASS] counter file holds 13
+=== Phase 2: restart must not reopen the replay window ===
+Restored last accepted counter 13 from /tmp/tmp.mOsugHOfZS
+Secure ECU receiver listening on vcan0 (CAN ID 0x123).
+Layers: SocketCAN -> frame checks -> HMAC -> freshness -> ECU application.
+[REJECT] ID=0x123 FRESHNESS=13 (last accepted 13): replayed counter
+[ACCEPT] ID=0x123 CMD=0x03 PARAMS=10 20 30 FRESHNESS=14
+[ECU] state=UNLOCKED executed=0
+Secure ECU receiver stopped.
+-----
+[PASS] counter restored after restart
+[PASS] pre-restart counter 13 rejected as replay
+[PASS] counter 14 accepted after restart
+=== Phase 3: corrupt counter file must stop the receiver ===
+Counter file /tmp/tmp.mOsugHOfZS: counter file is corrupt. Refusing to start so that old frames cannot be replayed.
+Secure ECU receiver stopped.
+-----
+[PASS] receiver exited with an error
+[PASS] refusal message printed
 ALL INTEGRATION CHECKS PASSED
