@@ -4,7 +4,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,14 +25,29 @@ static int parse_counter(const char *text, uint32_t *counter)
     if (text == NULL || counter == NULL || text[0] == '\0' || text[0] == '-') {
         return 0;
     }
-
     errno = 0;
     value = strtoul(text, &end, 10);
     if (errno != 0 || end == text || *end != '\0' || value > UINT32_MAX) {
         return 0;
     }
-
     *counter = (uint32_t)value;
+    return 1;
+}
+
+static int parse_command(const char *text, uint8_t *command)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if (text == NULL || command == NULL || text[0] == '\0' || text[0] == '-') {
+        return 0;
+    }
+    errno = 0;
+    value = strtoul(text, &end, 16);
+    if (errno != 0 || end == text || *end != '\0' || value > 0xFFUL) {
+        return 0;
+    }
+    *command = (uint8_t)value;
     return 1;
 }
 
@@ -45,15 +59,20 @@ int main(int argc, char **argv)
     uint8_t key[SECOC_KEY_LEN] = {0};
     const uint8_t params[SECOC_PARAMS_LEN] = {0x10U, 0x20U, 0x30U};
     uint8_t payload[SECOC_PAYLOAD_LEN] = {0};
+    uint8_t command = 0xA1U;
     uint32_t freshness;
     int sock = -1;
     int enable_fd = 1;
     int exit_status = EXIT_FAILURE;
+    unsigned int ifindex;
+    ssize_t sent;
     struct sockaddr_can addr;
     struct canfd_frame frame;
 
-    if (argc != 4) {
-        fprintf(stderr, "Usage: %s <interface> <valid|forged> <freshness-counter>\n",
+    if (argc != 4 && argc != 5) {
+        fprintf(stderr,
+                "Usage: %s <interface> <valid|forged> <freshness-counter> [command-hex]\n"
+                "Commands: 01 lock, 02 unlock, 03 status, A1 ping (default)\n",
                 argv[0]);
         return EXIT_FAILURE;
     }
@@ -68,6 +87,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "Freshness counter must be an unsigned 32-bit decimal integer.\n");
         return EXIT_FAILURE;
     }
+    if (argc == 5 && !parse_command(argv[4], &command)) {
+        fprintf(stderr, "Command must be one or two hex digits (00-FF).\n");
+        return EXIT_FAILURE;
+    }
     if (!secoc_parse_key_hex(key_hex, key)) {
         fprintf(stderr,
                 "SECURE_ECU_KEY_HEX is missing or invalid; set it to exactly %u hex characters.\n",
@@ -75,7 +98,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    if (!secoc_build_payload(key, SECOC_CAN_ID, 0xA1U, params,
+    if (!secoc_build_payload(key, SECOC_CAN_ID, command, params,
                              freshness, payload)) {
         fprintf(stderr, "Unable to create secured payload.\n");
         goto cleanup;
@@ -97,7 +120,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    unsigned int ifindex = if_nametoindex(ifname);
+    ifindex = if_nametoindex(ifname);
     if (ifindex == 0U) {
         fprintf(stderr, "CAN interface '%s' was not found.\n", ifname);
         goto cleanup;
@@ -117,19 +140,19 @@ int main(int argc, char **argv)
     frame.flags = 0U;
     memcpy(frame.data, payload, sizeof(payload));
 
-    ssize_t sent = write(sock, &frame, CANFD_MTU);
+    sent = write(sock, &frame, CANFD_MTU);
     if (sent == -1) {
         perror("write(CAN FD frame)");
         goto cleanup;
     }
-    if (sent != CANFD_MTU) {
+    if ((size_t)sent != (size_t)CANFD_MTU) {
         fprintf(stderr, "Short CAN FD write: %zd of %zu bytes.\n",
                 sent, (size_t)CANFD_MTU);
         goto cleanup;
     }
 
-    printf("Sent %s test frame: ID=0x%03X CMD=0xA1 FRESHNESS=%u\n",
-           mode, SECOC_CAN_ID, freshness);
+    printf("Sent %s test frame: ID=0x%03X CMD=0x%02X FRESHNESS=%u\n",
+           mode, SECOC_CAN_ID, (unsigned int)command, freshness);
     if (strcmp(mode, "forged") == 0) {
         puts("The first authentication-tag byte was deliberately altered.");
     }

@@ -5,30 +5,47 @@ CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -O2 -g
 OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl)
 OPENSSL_LIBS := $(shell pkg-config --libs openssl)
 BUILD_DIR := build
-HDRS := include/secoc.h include/freshness.h
+HDRS := $(wildcard include/*.h)
+COMPILE = $(CC) $(CPPFLAGS) $(CFLAGS) $(OPENSSL_CFLAGS)
+SEC_SRCS := src/secoc.c src/freshness.c src/sec_layer.c
 
-.PHONY: all test clean
+BINS := $(BUILD_DIR)/can_receiver $(BUILD_DIR)/secoc_sender \
+        $(BUILD_DIR)/test_secoc $(BUILD_DIR)/test_freshness \
+        $(BUILD_DIR)/test_sec_layer $(BUILD_DIR)/test_ecu_app
 
-all: $(BUILD_DIR)/can_receiver $(BUILD_DIR)/secoc_sender $(BUILD_DIR)/test_secoc $(BUILD_DIR)/test_freshness
+.PHONY: all test integration clean
+
+all: $(BINS)
 
 $(BUILD_DIR):
 > mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/can_receiver: src/can_receiver.c src/secoc.c src/freshness.c $(HDRS) | $(BUILD_DIR)
-> $(CC) $(CPPFLAGS) $(CFLAGS) $(OPENSSL_CFLAGS) src/can_receiver.c src/secoc.c src/freshness.c -o $@ $(OPENSSL_LIBS)
+$(BUILD_DIR)/can_receiver: src/can_receiver.c src/can_if.c src/ecu_app.c $(SEC_SRCS) $(HDRS) | $(BUILD_DIR)
+> $(COMPILE) $(filter %.c,$^) -o $@ $(OPENSSL_LIBS)
 
 $(BUILD_DIR)/secoc_sender: src/secoc_sender.c src/secoc.c $(HDRS) | $(BUILD_DIR)
-> $(CC) $(CPPFLAGS) $(CFLAGS) $(OPENSSL_CFLAGS) src/secoc_sender.c src/secoc.c -o $@ $(OPENSSL_LIBS)
+> $(COMPILE) $(filter %.c,$^) -o $@ $(OPENSSL_LIBS)
 
 $(BUILD_DIR)/test_secoc: tests/test_secoc.c src/secoc.c $(HDRS) | $(BUILD_DIR)
-> $(CC) $(CPPFLAGS) $(CFLAGS) $(OPENSSL_CFLAGS) tests/test_secoc.c src/secoc.c -o $@ $(OPENSSL_LIBS)
+> $(COMPILE) $(filter %.c,$^) -o $@ $(OPENSSL_LIBS)
 
 $(BUILD_DIR)/test_freshness: tests/test_freshness.c src/freshness.c $(HDRS) | $(BUILD_DIR)
-> $(CC) $(CPPFLAGS) $(CFLAGS) tests/test_freshness.c src/freshness.c -o $@
+> $(COMPILE) $(filter %.c,$^) -o $@ $(OPENSSL_LIBS)
 
-test: $(BUILD_DIR)/test_secoc $(BUILD_DIR)/test_freshness
+$(BUILD_DIR)/test_sec_layer: tests/test_sec_layer.c $(SEC_SRCS) $(HDRS) | $(BUILD_DIR)
+> $(COMPILE) $(filter %.c,$^) -o $@ $(OPENSSL_LIBS)
+
+$(BUILD_DIR)/test_ecu_app: tests/test_ecu_app.c src/ecu_app.c $(HDRS) | $(BUILD_DIR)
+> $(COMPILE) $(filter %.c,$^) -o $@ $(OPENSSL_LIBS)
+
+test: $(BUILD_DIR)/test_secoc $(BUILD_DIR)/test_freshness $(BUILD_DIR)/test_sec_layer $(BUILD_DIR)/test_ecu_app
 > ./$(BUILD_DIR)/test_secoc
 > ./$(BUILD_DIR)/test_freshness
+> ./$(BUILD_DIR)/test_sec_layer
+> ./$(BUILD_DIR)/test_ecu_app
+
+integration: all
+> bash tests/live_test.sh
 
 clean:
 > rm -rf $(BUILD_DIR)
