@@ -1,0 +1,34 @@
+bash tests/live_test.sh
+Secure ECU receiver listening on vcan0 (CAN ID 0x123).
+Layers: SocketCAN -> frame checks -> HMAC -> freshness -> ECU application.
+[ACCEPT] ID=0x123 CMD=0xA1 PARAMS=10 20 30 FRESHNESS=10
+[ECU] pong
+[REJECT] ID=0x123 FRESHNESS=10 (last accepted 10): replayed counter
+[REJECT] ID=0x123 FRESHNESS=5 (last accepted 10): stale counter
+[REJECT] ID=0x123 LEN=24: HMAC validation failed
+[ACCEPT] ID=0x123 CMD=0xA1 PARAMS=10 20 30 FRESHNESS=11
+[ECU] pong
+[REJECT] ID=0x123 FRESHNESS=5000 (last accepted 11): counter jump too large
+[ACCEPT] ID=0x123 CMD=0x01 PARAMS=10 20 30 FRESHNESS=12
+[ECU] doors locked
+[ACCEPT] ID=0x123 CMD=0x03 PARAMS=10 20 30 FRESHNESS=13
+[ECU] state=LOCKED executed=3
+[REJECT] ID=0x123 LEN=5: classic CAN is not accepted by this secured-message profile
+[REJECT] ID=0x123 LEN=16: incorrect secured payload length
+[REJECT] ID=0x124 LEN=24: unexpected CAN identifier
+Secure ECU receiver stopped.
+-----
+[PASS] frame 1: [ACCEPT]
+[PASS] frame 2: replayed counter
+[PASS] frame 3: stale counter
+[PASS] frame 4: HMAC validation failed
+[PASS] frame 5: [ACCEPT]
+[PASS] frame 6: counter jump too large
+[PASS] frame 7: [ACCEPT]
+[PASS] frame 8: [ACCEPT]
+[PASS] frame 9: classic CAN
+[PASS] frame 10: incorrect secured payload length
+[PASS] frame 11: unexpected CAN identifier
+[PASS] lock executed
+[PASS] status reports LOCKED after 3 commands
+ALL INTEGRATION CHECKS PASSED
