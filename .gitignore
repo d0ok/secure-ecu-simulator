@@ -1,2 +1,9 @@
-build/
+/build/
 *.o
+*.core
+core
+core.*
+.env
+.env.*
+*~
+
