@@ -4,7 +4,7 @@ A lightweight Electronic Control Unit (ECU) simulator written in C that uses Lin
 
 The project explores automotive cybersecurity concepts through a modular, AUTOSAR-inspired architecture, including message authentication, freshness management, replay protection, and secure command processing.
 
-> **Project status:** In development. SocketCAN integration, SecOC authentication, and receiver-side freshness validation are implemented and unit-tested. The layered architecture and ECU command processing are planned next.
+> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. Counter persistence, fuzz testing, and continuous integration are planned next.
 
 ## Objectives
 
@@ -20,63 +20,57 @@ The project explores automotive cybersecurity concepts through a modular, AUTOSA
 
 ### Implemented
 
-- SocketCAN raw socket integration.
-- Virtual CAN interface support using `vcan0`.
-- CAN FD frame reception.
-- OpenSSL-based HMAC-SHA-256 authentication.
-- A 16-byte truncated authentication tag.
+- SocketCAN raw socket integration with CAN FD support (`vcan0`).
+- OpenSSL-based HMAC-SHA-256 authentication with a 16-byte truncated tag.
 - Configurable test key through an environment variable.
-- Receiver-side freshness counter tracking.
-- Rejection of duplicate (replayed) and stale messages.
+- Receiver-side freshness counter tracking, with rejection of duplicate and stale messages.
 - Bounded forward counter jump and counter-exhaustion handling.
-- Unit tests for valid messages, tampering, malformed input, and freshness rules.
+- Layered software: communication, security, and ECU application.
+- Simulated ECU commands (lock, unlock, status, ping) that run only after authentication and freshness validation succeed.
+- Unit tests for each layer, and an automated live integration test.
 
 ### Planned
 
-- Separation of communication, security, freshness, and application layers.
-- ECU command execution only after successful authentication and freshness validation.
 - Persistent freshness counter across receiver restarts.
-- Expanded integration tests and continuous integration.
-- Architecture and test documentation in `docs/`.
+- Fuzz testing of malformed frames.
+- Continuous integration.
+- Architecture diagrams and test documentation in `docs/`.
 
 ## Architecture
-
-The current processing flow is:
 
 ```text
          CAN / CAN FD Network
                   |
                   v
         +--------------------+
-        |    SocketCAN       |
-        |   Communication    |
+        |  Communication     |   can_if
+        |  (SocketCAN)       |   open, receive, decode flags
         +--------------------+
                   |
                   v
         +--------------------+
-        |  Frame Validation  |
+        |  Security layer    |   sec_layer
+        |  1. frame checks   |   classic CAN, length, flags, CAN ID
+        |  2. SecOC / HMAC   |   secoc
+        |  3. freshness      |   freshness
         +--------------------+
-                  |
+                  |  only if all three pass
                   v
         +--------------------+
-        |   SecOC / HMAC     |
-        |  Authentication    |
-        +--------------------+
-                  |
-                  v
-        +--------------------+
-        |  Freshness Manager |
-        +--------------------+
-                  |
-                  v
-        +--------------------+
-        |   ECU Application  |
-        | Command Processing |
-        |     (Planned)      |
+        |  ECU application   |   ecu_app
+        |  command handler   |
         +--------------------+
 ```
 
-Authentication is always evaluated before freshness. A forged frame can therefore never advance the stored counter.
+Checks always run in this order: frame validation, HMAC verification, freshness. A forged frame therefore never advances the stored counter, and a command is never executed unless every check passes.
+
+| Layer | Module | Responsibility |
+|---|---|---|
+| Communication | `can_if` | Opens the CAN socket, reads frames, and reports identifier, length, and frame type without any security logic. |
+| Security | `sec_layer` | Runs the validation pipeline and returns one result per frame. Has no socket code, so it is unit-tested with hand-built frames. |
+| Security | `secoc` | Builds and verifies the truncated HMAC-SHA-256 tag. |
+| Security | `freshness` | Tracks the last accepted counter and rejects replayed, stale, or implausible counters. |
+| Application | `ecu_app` | Executes supported commands on a simulated ECU state. |
 
 The project uses an AUTOSAR-inspired design for learning purposes. It is not a complete AUTOSAR implementation and does not claim compliance with an AUTOSAR release.
 
@@ -100,6 +94,17 @@ The CAN identifier used for the example profile is `0x123`, and the configured D
 
 This message format is a simplified educational profile inspired by AUTOSAR SecOC concepts, not the complete standardized SecOC PDU format.
 
+## ECU Commands
+
+| Command | Name | Effect |
+|---:|---|---|
+| `0x01` | Lock | Sets the simulated door state to locked |
+| `0x02` | Unlock | Sets the simulated door state to unlocked |
+| `0x03` | Status | Reports the lock state and the number of commands executed so far |
+| `0xA1` | Ping | Replies `pong` |
+
+An authenticated, fresh frame with any other command value is accepted by the security layer but reported by the application as unsupported, and it changes no ECU state. The `PARAMS` bytes are carried and authenticated but not used by the current command set.
+
 ## Freshness Policy
 
 After a frame passes frame validation and HMAC verification, the receiver applies these rules to its freshness counter:
@@ -119,16 +124,25 @@ Every rejection leaves the stored counter unchanged. A jump limit of 0 disables 
 ```text
 secure-ecu-simulator/
 ├── include/
-│   ├── secoc.h
-│   └── freshness.h
+│   ├── can_if.h
+│   ├── ecu_app.h
+│   ├── freshness.h
+│   ├── sec_layer.h
+│   └── secoc.h
 ├── src/
+│   ├── can_if.c
 │   ├── can_receiver.c
+│   ├── ecu_app.c
+│   ├── freshness.c
+│   ├── sec_layer.c
 │   ├── secoc.c
-│   ├── secoc_sender.c
-│   └── freshness.c
+│   └── secoc_sender.c
 ├── tests/
-│   ├── test_secoc.c
-│   └── test_freshness.c
+│   ├── live_test.sh
+│   ├── test_ecu_app.c
+│   ├── test_freshness.c
+│   ├── test_sec_layer.c
+│   └── test_secoc.c
 ├── docs/
 ├── Makefile
 ├── LICENSE
@@ -136,15 +150,10 @@ secure-ecu-simulator/
 └── .gitignore
 ```
 
-- `include/secoc.h`: Public definitions and interfaces for the authentication module.
-- `include/freshness.h`: Interface for the freshness manager.
-- `src/can_receiver.c`: SocketCAN receiver, frame validation, authentication, and freshness checks.
-- `src/secoc.c`: Message construction, HMAC generation, and authentication verification.
+- `src/can_receiver.c`: The ECU program. It wires the three layers together in a receive loop.
 - `src/secoc_sender.c`: Utility for sending valid and deliberately forged test messages.
-- `src/freshness.c`: Counter validation and replay rejection logic.
-- `tests/test_secoc.c`: Authentication unit tests.
-- `tests/test_freshness.c`: Freshness unit tests.
-- `docs/`: Architecture documentation and test evidence.
+- `tests/live_test.sh`: Starts the receiver, sends a scripted sequence of valid, forged, replayed, and malformed frames over `vcan0`, and checks the output.
+- `docs/`: Test evidence and documentation.
 
 The `build/` directory holds generated binaries and is excluded from version control.
 
@@ -182,7 +191,7 @@ sudo apt install -y \
 ### 1. Clone the repository
 
 ```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL>
+git clone https://github.com/d0ok/secure-ecu-simulator.git
 cd secure-ecu-simulator
 ```
 
@@ -210,8 +219,6 @@ The virtual interface enables CAN communication testing without physical automot
 
 ## Build
 
-Compile the project:
-
 ```bash
 make
 ```
@@ -223,91 +230,74 @@ make clean
 make
 ```
 
-The expected executables are:
-
-```text
-build/can_receiver
-build/secoc_sender
-build/test_secoc
-build/test_freshness
-```
-
-The exact build targets are defined in the Makefile.
+The build produces the receiver, the sender, and one test program per module in `build/`. The exact targets are defined in the Makefile.
 
 ## Unit Tests
-
-Run both test suites:
 
 ```bash
 make test
 ```
 
-The authentication suite covers:
+This runs four suites:
 
-- Parsing a hexadecimal authentication key.
-- Rejecting a malformed key.
-- Creating an authenticated message.
-- Accepting a valid message.
-- Decoding the big-endian freshness value.
-- Rejecting modified commands and parameters.
-- Rejecting modified freshness values.
-- Rejecting an altered authentication tag.
-- Rejecting an incorrect CAN identifier.
-- Rejecting malformed payload lengths.
-
-The freshness suite covers:
-
-- Accepting increasing counters.
-- Rejecting duplicate and older counters.
-- Accepting a jump of exactly the maximum and rejecting anything larger.
-- Leaving state unchanged after a rejected jump.
-- Unlimited jumps when the limit is 0.
-- Rejecting all frames after counter exhaustion, including wraparound to 0.
-- Rejecting a NULL state argument.
+- **SecOC:** key parsing, payload construction, acceptance of authentic payloads, rejection of modified commands, parameters, freshness values, tags, CAN identifiers, and payload lengths.
+- **Freshness:** increasing counters, duplicate and older counters, jump limits, unchanged state after a rejection, unlimited jumps, counter exhaustion and wraparound, and NULL arguments.
+- **Security layer:** the full validation pipeline using hand-built frames, including forged tags that must not consume the counter, classic CAN, wrong length, extended, remote, and error frames, wrong CAN identifier, and a tag signed for a different identifier.
+- **ECU application:** each command, state changes, unsupported commands changing nothing, truncated output buffers, and invalid arguments.
 
 ## Live SocketCAN Testing
 
-### 1. Configure the test key
+### Automated
 
-Use the following key only for local development:
+With `vcan0` up:
+
+```bash
+make integration
+```
+
+The script starts the receiver, sends valid, forged, replayed, stale, oversized-jump, and malformed frames, checks every result, and finishes with `ALL INTEGRATION CHECKS PASSED` when everything matches. The three malformed frames are sent with `cansend` from `can-utils`.
+
+### Manual
+
+Use the following key only for local development, and export it in both terminals:
 
 ```bash
 export SECURE_ECU_KEY_HEX=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
 ```
-
-The same key must be set in the receiver and sender terminals.
-
-### 2. Start the ECU receiver
 
 In Terminal 1:
 
 ```bash
-export SECURE_ECU_KEY_HEX=00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
-
 ./build/can_receiver vcan0
 ```
 
-### 3. Send test messages
-
-In Terminal 2, with the same key exported:
+In Terminal 2:
 
 ```bash
-./build/secoc_sender vcan0 valid 10      # accepted
+./build/secoc_sender vcan0 valid 10      # accepted (ping)
 ./build/secoc_sender vcan0 valid 10      # rejected: replayed counter
 ./build/secoc_sender vcan0 valid 5       # rejected: stale counter
 ./build/secoc_sender vcan0 forged 11     # rejected: HMAC validation failed
 ./build/secoc_sender vcan0 valid 11      # accepted: the forged frame did not consume the counter
 ./build/secoc_sender vcan0 valid 5000    # rejected: counter jump too large
-./build/secoc_sender vcan0 valid 12      # accepted
+./build/secoc_sender vcan0 valid 12 01   # accepted: lock
+./build/secoc_sender vcan0 valid 13 03   # accepted: status
 ```
 
-The first counter after a receiver start must be within `FRESHNESS_MAX_JUMP` of 0.
+The sender usage is `secoc_sender <interface> <valid|forged> <counter> [command-hex]`. The command defaults to `A1` (ping). The first counter after a receiver start must be within `FRESHNESS_MAX_JUMP` of 0.
+
+Example receiver output for an accepted command:
+
+```text
+[ACCEPT] ID=0x123 CMD=0x01 PARAMS=10 20 30 FRESHNESS=12
+[ECU] doors locked
+```
 
 ## Security Considerations
 
 - **Authentication:** HMAC-SHA-256 verifies message integrity and possession of the shared secret.
 - **Tag truncation:** The prototype uses a 128-bit authentication tag derived from HMAC-SHA-256.
-- **Freshness:** The receiver accepts only strictly increasing counters, and only after the tag is verified. Forged frames cannot advance the counter.
+- **Check ordering:** Frame checks, then HMAC, then freshness. Commands run only after all three pass, and forged frames cannot advance the counter.
 - **Jump limit:** A bounded forward jump prevents a single authenticated frame from pushing the counter near `UINT32_MAX` and locking out the legitimate sender.
 - **Counter exhaustion:** Once the counter reaches `UINT32_MAX`, all frames are rejected. A real system would need key or session rollover.
 - **Counter persistence:** The counter is stored in RAM and resets to 0 when the receiver restarts. Frames recorded earlier could be replayed after a restart. Real ECUs persist the counter in non-volatile memory or resynchronize through a protocol.
@@ -323,12 +313,13 @@ The first counter after a receiver start must be within `FRESHNESS_MAX_JUMP` of 
 - [x] Implement HMAC-SHA-256 authentication.
 - [x] Test valid messages and authentication failures.
 - [x] Implement freshness counter validation.
-- [x] Reject duplicate and stale messages (unit-tested).
+- [x] Reject duplicate and stale messages.
 - [x] Complete live valid, forged, and replay integration testing.
-- [ ] Implement AUTOSAR-inspired software layers.
-- [ ] Add ECU command processing after security checks.
+- [x] Implement AUTOSAR-inspired software layers.
+- [x] Add ECU command processing after security checks.
 - [ ] Persist the freshness counter across restarts.
-- [ ] Expand integration tests and security documentation.
+- [ ] Add fuzz testing for malformed frames.
+- [ ] Add architecture diagrams and test documentation to `docs/`.
 - [ ] Configure continuous integration.
 
 ## Learning Outcomes
