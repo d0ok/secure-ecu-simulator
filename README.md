@@ -324,7 +324,7 @@ The first counter after a receiver start must be within `FRESHNESS_MAX_JUMP` of 
 - [x] Test valid messages and authentication failures.
 - [x] Implement freshness counter validation.
 - [x] Reject duplicate and stale messages (unit-tested).
-- [ ] Complete live valid, forged, and replay integration testing.
+- [x] Complete live valid, forged, and replay integration testing.
 - [ ] Implement AUTOSAR-inspired software layers.
 - [ ] Add ECU command processing after security checks.
 - [ ] Persist the freshness counter across restarts.
