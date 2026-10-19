@@ -1,3 +1,8 @@
+# Live freshness test on vcan0
+# Receiver: ./build/can_receiver vcan0
+# Sender:   secoc_sender vcan0 valid 10 / valid 10 / valid 5 / forged 11 / valid 11 / valid 5000 / valid 12
+# Commit:   272848c
+
 Secure ECU receiver listening on vcan0 (CAN ID 0x123).
 Expected payload: 24-byte CAN FD; HMAC-SHA-256 tag: 16 bytes.
 MAC verification and freshness checks are enabled.
