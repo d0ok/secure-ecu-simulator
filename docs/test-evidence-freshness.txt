@@ -1,0 +1,11 @@
+Secure ECU receiver listening on vcan0 (CAN ID 0x123).
+Expected payload: 24-byte CAN FD; HMAC-SHA-256 tag: 16 bytes.
+MAC verification and freshness checks are enabled.
+[ACCEPT] ID=0x123 CMD=0xA1 PARAMS=10 20 30 FRESHNESS=10
+[REJECT] ID=0x123 FRESHNESS=10 (last accepted 10): replayed counter
+[REJECT] ID=0x123 FRESHNESS=5 (last accepted 10): stale counter
+[REJECT] raw_id=0x00000123 LEN=24: HMAC validation failed
+[ACCEPT] ID=0x123 CMD=0xA1 PARAMS=10 20 30 FRESHNESS=11
+[REJECT] ID=0x123 FRESHNESS=5000 (last accepted 11): counter jump too large
+[ACCEPT] ID=0x123 CMD=0xA1 PARAMS=10 20 30 FRESHNESS=12
+Secure ECU receiver stopped.

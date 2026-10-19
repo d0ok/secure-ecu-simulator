@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "secoc.h"
+#include "freshness.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -40,8 +41,10 @@ int main(int argc, char **argv)
     int sock = -1;
     int enable_fd = 1;
     int exit_status = EXIT_FAILURE;
+    unsigned int ifindex;
     struct sockaddr_can addr;
     struct sigaction sa;
+    freshness_t freshness;
 
     if (argc > 2) {
         fprintf(stderr, "Usage: %s [interface]\n", argv[0]);
@@ -58,6 +61,9 @@ int main(int argc, char **argv)
                 (unsigned int)SECOC_KEY_HEX_LEN);
         goto cleanup;
     }
+
+    /* Receiver-side freshness state. Lives in RAM: resets on restart. */
+    freshness_init(&freshness, 0U, FRESHNESS_MAX_JUMP);
 
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = handle_signal;
@@ -79,7 +85,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    unsigned int ifindex = if_nametoindex(ifname);
+    ifindex = if_nametoindex(ifname);
     if (ifindex == 0U) {
         fprintf(stderr, "CAN interface '%s' was not found.\n", ifname);
         goto cleanup;
@@ -97,7 +103,7 @@ int main(int argc, char **argv)
            ifname, SECOC_CAN_ID);
     printf("Expected payload: %u-byte CAN FD; HMAC-SHA-256 tag: %u bytes.\n",
            (unsigned int)SECOC_PAYLOAD_LEN, (unsigned int)SECOC_TAG_LEN);
-    printf("MAC verification is enabled; freshness replay checks come next.\n");
+    printf("MAC verification and freshness checks are enabled.\n");
     fflush(stdout);
     exit_status = EXIT_SUCCESS;
 
@@ -105,6 +111,8 @@ int main(int argc, char **argv)
         struct canfd_frame frame;
         ssize_t nbytes;
         uint32_t can_id;
+        uint32_t fresh;
+        freshness_status_t fstatus;
 
         memset(&frame, 0, sizeof(frame));
         nbytes = read(sock, &frame, CANFD_MTU);
@@ -117,6 +125,7 @@ int main(int argc, char **argv)
             break;
         }
 
+        /* 1. Frame-level validation */
         if (nbytes == CAN_MTU) {
             reject_frame(frame.can_id, frame.len,
                          "classic CAN is not accepted by this secured-message profile");
@@ -146,21 +155,36 @@ int main(int argc, char **argv)
             continue;
         }
 
+        /* 2. Authentication: must pass BEFORE freshness is evaluated, so
+         *    forged frames can never advance the stored counter. */
         if (!secoc_verify_payload(key, can_id, frame.data, frame.len)) {
             reject_frame(frame.can_id, frame.len, "HMAC validation failed");
             continue;
         }
 
-        printf("[AUTH OK] ID=0x%03X CMD=0x%02X PARAMS=%02X %02X %02X FRESHNESS=%u\n",
+        /* 3. Freshness: strictly increasing counter, bounded forward jump. */
+        fresh = secoc_payload_freshness(frame.data);
+        fstatus = freshness_accept(&freshness, fresh);
+        if (fstatus != FRESHNESS_OK) {
+            printf("[REJECT] ID=0x%03X FRESHNESS=%u (last accepted %u): %s\n",
+                   (unsigned int)can_id,
+                   (unsigned int)fresh,
+                   (unsigned int)freshness.last_accepted,
+                   freshness_status_str(fstatus));
+            fflush(stdout);
+            continue;
+        }
+
+        printf("[ACCEPT] ID=0x%03X CMD=0x%02X PARAMS=%02X %02X %02X FRESHNESS=%u\n",
                (unsigned int)can_id,
                (unsigned int)frame.data[SECOC_COMMAND_OFFSET],
                (unsigned int)frame.data[SECOC_PARAMS_OFFSET],
                (unsigned int)frame.data[SECOC_PARAMS_OFFSET + 1U],
                (unsigned int)frame.data[SECOC_PARAMS_OFFSET + 2U],
-               (unsigned int)secoc_payload_freshness(frame.data));
+               (unsigned int)fresh);
         fflush(stdout);
 
-        /* Do not execute the command yet. Replay/freshness policy is the next step. */
+        /* Command execution is added in Step 5, after both checks pass. */
     }
 
 cleanup:
