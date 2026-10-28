@@ -10,7 +10,7 @@ COMPILE = $(CC) $(CPPFLAGS) $(CFLAGS) $(OPENSSL_CFLAGS)
 SEC_SRCS := src/secoc.c src/freshness.c src/sec_layer.c
 
 # Fuzzing: AddressSanitizer + UndefinedBehaviorSanitizer, any UB aborts the run.
-FUZZ_FLAGS := -std=c11 -Wall -Wextra -Wpedantic -O1 -g \
+FUZZ_FLAGS := -std=c11 -Wall -Wextra -Wpedantic -Wshadow -O1 -g \
               -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 FUZZ_ITERS ?= 100000
 FUZZ_SEED ?= 1

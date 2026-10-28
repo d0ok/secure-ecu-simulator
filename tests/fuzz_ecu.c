@@ -53,6 +53,28 @@ static void rnd_bytes(uint8_t *p, size_t n)
     }
 }
 
+/*
+ * C leaves the evaluation order of operands unspecified, so an expression such
+ * as data[below(n)] ^= (1U << below(8U)) may draw its two random numbers in a
+ * different order on another compiler. The helpers below sequence every draw
+ * explicitly, which keeps a given seed reproducible across compilers.
+ */
+static void flip_random_bit(uint8_t *data, size_t len)
+{
+    uint32_t pos = below((uint32_t)len);
+    uint32_t bit = below(8U);
+
+    data[pos] ^= (uint8_t)(1U << bit);
+}
+
+static void set_random_byte(uint8_t *data, size_t len)
+{
+    uint32_t pos = below((uint32_t)len);
+    uint8_t value = (uint8_t)rnd32();
+
+    data[pos] = value;
+}
+
 /* ---------- reporting ---------- */
 
 static const char *g_phase = "";
@@ -195,7 +217,10 @@ static void fuzz_key_parse(uint64_t iters)
             }
         }
         if (kind == 2U && len > 0U) {
-            s[below((uint32_t)len)] = (char)(1U + below(255U));
+            uint32_t pos = below((uint32_t)len);
+            uint32_t bad_byte = 1U + below(255U);
+
+            s[pos] = (char)bad_byte;
         }
         s[len] = '\0';
 
@@ -267,7 +292,7 @@ static void fuzz_verify(uint64_t iters, const uint8_t key[SECOC_KEY_LEN])
         if (secoc_verify_payload(key, SECOC_CAN_ID ^ (1U << below(11U)), good, sizeof(good)) != 0) {
             VIOLATION("payload verified under a different CAN ID");
         }
-        good[below(SECOC_PAYLOAD_LEN)] ^= (uint8_t)(1U << below(8U));
+        flip_random_bit(good, SECOC_PAYLOAD_LEN);
         if (secoc_verify_payload(key, SECOC_CAN_ID, good, sizeof(good)) != 0) {
             VIOLATION("payload with a flipped bit verified");
         }
@@ -334,8 +359,8 @@ static void mutate(can_msg_t *m)
     do {
         *m = orig;
         switch (below(7U)) {
-        case 0:  m->data[below(SECOC_PAYLOAD_LEN)] ^= (uint8_t)(1U << below(8U)); break;
-        case 1:  m->data[below(SECOC_PAYLOAD_LEN)] = (uint8_t)rnd32(); break;
+        case 0:  flip_random_bit(m->data, SECOC_PAYLOAD_LEN); break;
+        case 1:  set_random_byte(m->data, SECOC_PAYLOAD_LEN); break;
         case 2:  m->id = rnd32() & 0x7FFU; break;
         case 3:  m->len = (uint8_t)below(65U); break;
         case 4:  m->is_fd ^= 1; break;
@@ -349,7 +374,7 @@ static void mutate(can_msg_t *m)
         default: {
             uint32_t k, n = 1U + below(4U);
             for (k = 0; k < n; k++) {
-                m->data[below(SECOC_PAYLOAD_LEN)] ^= (uint8_t)(1U << below(8U));
+                flip_random_bit(m->data, SECOC_PAYLOAD_LEN);
             }
             break;
         }
@@ -676,7 +701,10 @@ static void fuzz_counter_store(uint64_t iters)
             /* A valid record with one byte replaced: it may only load as the same value. */
             len = (size_t)snprintf(line, sizeof(line), "v1 %lu %08lx\n", (unsigned long)value,
                                    (~(unsigned long)value) & 0xFFFFFFFFUL);
-            line[below((uint32_t)len)] = (char)rnd32();
+            uint8_t new_byte = (uint8_t)rnd32();
+            uint32_t pos = below((uint32_t)len);
+
+            line[pos] = (char)new_byte;
             write_bytes(path, (const uint8_t *)line, len);
             st = cstore_load(path, &out);
             if (st == CSTORE_OK && out != value) {
