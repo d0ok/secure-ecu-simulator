@@ -1,0 +1,4 @@
+./build/fuzz_ecu 100000 1
+Fuzzing with seed 1, 100000 iterations per phase
+  security layer: 4490 valid frames accepted, 11554 replays rejected, 19981 authentication failures
+FUZZ PASSED: 430201 cases, no violations, no sanitizer findings (seed 1)
