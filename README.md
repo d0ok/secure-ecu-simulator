@@ -6,7 +6,7 @@ A lightweight Electronic Control Unit (ECU) simulator written in C that uses Lin
 
 The project explores automotive cybersecurity concepts through a modular, AUTOSAR-inspired architecture, including message authentication, freshness management, replay protection, and secure command processing.
 
-> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. The freshness counter survives restarts, the code is fuzz tested under sanitizers, and continuous integration runs the build and tests on every push. Architecture diagrams and a test report in `docs/` are planned next.
+> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. The freshness counter survives restarts, the code is fuzz tested under sanitizers, and continuous integration runs the build and tests on every push. Architecture, test report, and threat model documents are in `docs/`.
 
 ## Objectives
 
@@ -33,10 +33,15 @@ The project explores automotive cybersecurity concepts through a modular, AUTOSA
 - Unit tests for each layer, and an automated live integration test.
 - Fuzz and property tests run under AddressSanitizer and UndefinedBehaviorSanitizer.
 - Continuous integration with GitHub Actions (build, unit tests, short fuzz run).
+- Documentation: architecture with diagrams, a test report, and a threat model in `docs/`.
 
-### Planned
+### Possible future work
 
-- Architecture diagrams and test documentation in `docs/`.
+- Counter resynchronization between sender and receiver.
+- Per-session keys or key rotation.
+- Counter storage in simulated protected memory.
+- Frame-age bounds to limit delayed delivery of valid frames.
+- Rate limiting of rejected frames.
 
 ## Architecture
 
@@ -166,6 +171,10 @@ secure-ecu-simulator/
 │   ├── test_sec_layer.c
 │   └── test_secoc.c
 ├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── TEST-REPORT.md
+│   ├── THREAT-MODEL.md
+│   └── test-evidence-*.txt
 ├── Makefile
 ├── LICENSE
 ├── README.md
@@ -178,6 +187,12 @@ secure-ecu-simulator/
 - `docs/`: Test evidence and documentation.
 
 The `build/` directory holds generated binaries and is excluded from version control.
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md): layers, the order of checks for every frame, message format, freshness rules, and counter persistence, with diagrams.
+- [Test report](docs/TEST-REPORT.md): every test level, what each covers, requirement coverage, how to reproduce the results, and the limits of the testing.
+- [Threat model](docs/THREAT-MODEL.md): what is protected, which attackers are considered, what is defended, and what is not.
 
 ## Requirements
 
@@ -359,6 +374,8 @@ Example receiver output for an accepted command:
 - **Transport:** `vcan0` is a software testing interface, not a physical CAN bus.
 - **Safety:** The simulator is not intended for deployment in a production vehicle or safety-critical ECU.
 
+See the [threat model](docs/THREAT-MODEL.md) for the full list of what the design does and does not protect against.
+
 ## Roadmap
 
 - [x] Initialize project and Git repository.
@@ -373,7 +390,7 @@ Example receiver output for an accepted command:
 - [x] Add ECU command processing after security checks.
 - [x] Persist the freshness counter across restarts.
 - [x] Add fuzz testing for malformed frames.
-- [ ] Add architecture diagrams and test documentation to `docs/`.
+- [x] Add architecture diagrams and test documentation to `docs/`.
 - [x] Configure continuous integration.
 
 ## Learning Outcomes
