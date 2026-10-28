@@ -65,7 +65,7 @@ Pass criterion: the script ends with `ALL INTEGRATION CHECKS PASSED` and exits w
 | ECU application | State matches a model, output is always NUL-terminated, and any buffer size is handled safely. |
 | Counter file | Garbage and damaged files never load as a different value. Saving and loading round-trips. No temporary file is left behind. |
 
-The default run (`make fuzz`) uses 100,000 iterations per phase and seed 1, which is 430,201 cases. The CI run uses 50,000 iterations, which is 215,201 cases. Choose other sizes and seeds with `make fuzz FUZZ_ITERS=1000000 FUZZ_SEED=7`. A violation is printed with its phase and iteration, and the same seed reproduces it.
+The default run (`make fuzz`) uses 100,000 iterations per phase and seed 1, which is 430,201 cases. The CI run uses 50,000 iterations, which is 215,201 cases. Choose other sizes and seeds with `make fuzz FUZZ_ITERS=1000000 FUZZ_SEED=7`. A violation is printed with its phase and iteration, and on the same build the same seed reproduces it. The exact case sequence can differ between compilers or machines, so the per-phase statistics printed by one build may not match those of another.
 
 Pass criterion: the output ends with `FUZZ PASSED ... no violations, no sanitizer findings`.
 

@@ -1,4 +1,5 @@
+gcc -Iinclude -std=c11 -Wall -Wextra -Wpedantic -Wshadow -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer  tests/fuzz_ecu.c src/secoc.c src/freshness.c src/sec_layer.c src/ecu_app.c src/counter_store.c -o build/fuzz_ecu -lssl -lcrypto
 ./build/fuzz_ecu 100000 1
 Fuzzing with seed 1, 100000 iterations per phase
-  security layer: 4490 valid frames accepted, 11554 replays rejected, 19981 authentication failures
+  security layer: 4216 valid frames accepted, 11420 replays rejected, 19817 authentication failures
 FUZZ PASSED: 430201 cases, no violations, no sanitizer findings (seed 1)

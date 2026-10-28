@@ -300,7 +300,7 @@ make fuzz
 | ECU application | Behavior matches a state model, output is always NUL-terminated, and any buffer size is handled safely. |
 | Counter file | Garbage and damaged files never load as a different value. Saving and loading round-trips, and no temporary file is left behind. |
 
-Runs are deterministic. Choose the size and seed with `make fuzz FUZZ_ITERS=1000000 FUZZ_SEED=7`. The same seed always produces the same cases, so any reported violation can be reproduced. The default run takes a few seconds.
+Choose the size and seed with `make fuzz FUZZ_ITERS=1000000 FUZZ_SEED=7`. On a given build, the same seed produces the same cases, so a reported violation can be reproduced. The exact case sequence can differ between compilers or machines, so compare violations by seed on the same build. The default run takes a few seconds.
 
 The harness was also checked against deliberately broken code: forging a frame that consumes the counter, accepting stale counters, overflowing the ECU output buffer, and ignoring the counter-file check value are each detected.
 
