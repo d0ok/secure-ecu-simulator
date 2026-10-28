@@ -1,10 +1,12 @@
 # Secure ECU Simulator in C with SecOC
 
+[![CI](https://github.com/d0ok/secure-ecu-simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/d0ok/secure-ecu-simulator/actions/workflows/ci.yml)
+
 A lightweight Electronic Control Unit (ECU) simulator written in C that uses Linux SocketCAN for CAN communication and OpenSSL for HMAC-SHA-256 message authentication.
 
 The project explores automotive cybersecurity concepts through a modular, AUTOSAR-inspired architecture, including message authentication, freshness management, replay protection, and secure command processing.
 
-> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. The freshness counter survives restarts. Fuzz testing and continuous integration are planned next.
+> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. The freshness counter survives restarts, the code is fuzz tested under sanitizers, and continuous integration runs the build and tests on every push. Architecture diagrams and a test report in `docs/` are planned next.
 
 ## Objectives
 
@@ -29,11 +31,11 @@ The project explores automotive cybersecurity concepts through a modular, AUTOSA
 - Layered software: communication, security, and ECU application.
 - Simulated ECU commands (lock, unlock, status, ping) that run only after authentication and freshness validation succeed.
 - Unit tests for each layer, and an automated live integration test.
+- Fuzz and property tests run under AddressSanitizer and UndefinedBehaviorSanitizer.
+- Continuous integration with GitHub Actions (build, unit tests, short fuzz run).
 
 ### Planned
 
-- Fuzz testing of malformed frames.
-- Continuous integration.
 - Architecture diagrams and test documentation in `docs/`.
 
 ## Architecture
@@ -136,6 +138,9 @@ To start over during development, delete the file (`rm -f ~/.secure_ecu_counter`
 
 ```text
 secure-ecu-simulator/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── include/
 │   ├── can_if.h
 │   ├── counter_store.h
@@ -153,6 +158,7 @@ secure-ecu-simulator/
 │   ├── secoc.c
 │   └── secoc_sender.c
 ├── tests/
+│   ├── fuzz_ecu.c
 │   ├── live_test.sh
 │   ├── test_counter_store.c
 │   ├── test_ecu_app.c
@@ -262,6 +268,31 @@ This runs five suites:
 - **ECU application:** each command, state changes, unsupported commands changing nothing, truncated output buffers, and invalid arguments.
 - **Counter store:** saving and loading, the file format and permissions, atomic replacement, corrupt and truncated files, unwritable locations, and path resolution.
 
+## Fuzz Testing
+
+```bash
+make fuzz
+```
+
+`tests/fuzz_ecu.c` generates reproducible random and mutated inputs and checks properties that must always hold. It is built with AddressSanitizer and UndefinedBehaviorSanitizer, so memory errors and undefined behavior abort the run. If you see missing `libasan` or `libubsan` errors, install them with `sudo apt install libasan8 libubsan1`.
+
+| Phase | Properties checked |
+|---|---|
+| Freshness | Outcomes match an independent model of the rules, including counters near `UINT32_MAX`. A rejection never changes the stored counter. |
+| Key parsing | Only exactly 64 hex characters are accepted. Odd lengths and arbitrary bytes never crash the parser. |
+| Payload verification | Random payloads never verify. A valid payload verifies only under its own CAN ID. Wrong lengths are tested on exact-size heap buffers to catch over-reads. |
+| Security layer | Correctly signed frames follow the freshness rules. Replayed, mutated, wrong-key, wrong-ID, and random frames are always rejected, and none of them changes the stored counter. |
+| ECU application | Behavior matches a state model, output is always NUL-terminated, and any buffer size is handled safely. |
+| Counter file | Garbage and damaged files never load as a different value. Saving and loading round-trips, and no temporary file is left behind. |
+
+Runs are deterministic. Choose the size and seed with `make fuzz FUZZ_ITERS=1000000 FUZZ_SEED=7`. The same seed always produces the same cases, so any reported violation can be reproduced. The default run takes a few seconds.
+
+The harness was also checked against deliberately broken code: forging a frame that consumes the counter, accepting stale counters, overflowing the ECU output buffer, and ignoring the counter-file check value are each detected.
+
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on pull requests. It installs the dependencies on Ubuntu, builds everything, runs `make test`, and runs a short `make fuzz` pass. The live SocketCAN integration test needs a virtual CAN interface (`vcan`), which GitHub-hosted runners generally do not provide, so run `make integration` locally.
+
 ## Live SocketCAN Testing
 
 ### Automated
@@ -341,9 +372,9 @@ Example receiver output for an accepted command:
 - [x] Implement AUTOSAR-inspired software layers.
 - [x] Add ECU command processing after security checks.
 - [x] Persist the freshness counter across restarts.
-- [ ] Add fuzz testing for malformed frames.
+- [x] Add fuzz testing for malformed frames.
 - [ ] Add architecture diagrams and test documentation to `docs/`.
-- [ ] Configure continuous integration.
+- [x] Configure continuous integration.
 
 ## Learning Outcomes
 
