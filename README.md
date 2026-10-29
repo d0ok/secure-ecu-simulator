@@ -6,7 +6,6 @@ A lightweight Electronic Control Unit (ECU) simulator written in C that uses Lin
 
 The project explores automotive cybersecurity concepts through a modular, AUTOSAR-inspired architecture, including message authentication, freshness management, replay protection, and secure command processing.
 
-> **Project status:** In development. SocketCAN communication, SecOC authentication, freshness validation, and a simulated ECU application are implemented in separate layers, with unit tests and a live integration test. The freshness counter survives restarts, the code is fuzz tested under sanitizers, and continuous integration runs the build and tests on every push. Architecture, test report, and threat model documents are in `docs/`.
 
 ## Objectives
 
