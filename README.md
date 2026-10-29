@@ -404,6 +404,17 @@ This project provides practical experience with:
 - Modular embedded-software architecture.
 - Unit testing, integration testing, and Git-based development.
 
+## Disclaimer
+
+This project is provided for **educational and research purposes only**.
+
+- **Not for production or safety-critical use.** It is a simulator. It has not been reviewed, certified, or validated for use in any real vehicle or ECU, and it must not be used to protect or control real vehicle functions.
+- **Not an AUTOSAR implementation.** The design is inspired by AUTOSAR SecOC concepts but is simplified, and it does not claim compliance with any AUTOSAR release or other standard.
+- **Test keys only.** The key shown in this repository is a public development key with no security value. Never use it, or any real vehicle key, with this software.
+- **Use it only on systems you own or are authorized to test.** The code runs against a virtual CAN interface (`vcan0`). Do not connect it to a real vehicle network or to systems you do not have permission to test.
+- **No warranty and no liability.** As stated in the [MIT License](LICENSE), the software is provided "as is", without warranty of any kind, and the authors are not liable for any claim, damage, or loss arising from its use.
+- **Not security advice.** The [threat model](docs/THREAT-MODEL.md) lists known limitations. Passing the included tests does not prove the code is free of vulnerabilities.
+
 ## License
 
 This project is released under the [MIT License](LICENSE). It is intended for educational and research purposes and comes with no warranty.
